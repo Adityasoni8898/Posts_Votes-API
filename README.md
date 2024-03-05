@@ -26,4 +26,3 @@ Follow these steps to set up and run the FastVoteAPI on your local machine.
 
 ```bash
 git clone https://github.com/yourusername/FastVoteAPI.git
-cd FastVoteAPI
