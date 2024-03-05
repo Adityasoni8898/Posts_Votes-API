@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 from .. import schemas, models, oauth2
 from fastapi import HTTPException, Response, status, Depends, APIRouter
 from sqlalchemy.orm import Session
@@ -10,9 +10,10 @@ router = APIRouter(
 )
 
 @router.get("/", response_model=List[schemas.Post])
-def get_posts(db: Session = Depends(get_db)):
-    
-    posts = db.query(models.Post).all()
+def get_posts(db: Session = Depends(get_db), curr_user:int = Depends(oauth2.get_current_user),
+              limit: int = 10, skip: int = 0, search: Optional[str] = ""):
+    posts = db.query(models.Post).filter(
+        models.Post.owner_id == curr_user.id).filter(models.Post.title.contains(search)).limit(limit).offset(skip).all()
     
     return posts
     
@@ -22,9 +23,9 @@ def get_posts(db: Session = Depends(get_db)):
 
 
 @router.post("/", status_code=status.HTTP_201_CREATED, response_model=schemas.Post)
-def create_item(post: schemas.PostCreate, db: Session = Depends(get_db), user_id:int = Depends(oauth2.get_current_user)):
+def create_item(post: schemas.PostCreate, db: Session = Depends(get_db), curr_user:int = Depends(oauth2.get_current_user)):
     
-    new_post = models.Post(**post.dict()) #** means open the dictionary and pass the key value pairs as arguments
+    new_post = models.Post(owner_id = curr_user.id, **post.model_dump()) #** means open the dictionary and pass the key value pairs as arguments
     
     db.add(new_post)
     db.commit()
@@ -38,12 +39,15 @@ def create_item(post: schemas.PostCreate, db: Session = Depends(get_db), user_id
     # return {"new post": new_post}
 
 @router.get("/{post_id}", response_model=schemas.Post)
-def get_post(post_id: int, db: Session = Depends(get_db), user_id:int = Depends(oauth2.get_current_user)):
+def get_post(post_id: int, db: Session = Depends(get_db), curr_user:int = Depends(oauth2.get_current_user)):
     
-    post = db.query(models.Post).filter(models.Post.id == post_id).first()
+    post_query = db.query(models.Post).filter(models.Post.id == post_id)
+    post = post_query.first()
     
     if not post:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
+    if post.owner_id != curr_user.id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authorized to view this post")
     else:
         return post
     
@@ -55,14 +59,17 @@ def get_post(post_id: int, db: Session = Depends(get_db), user_id:int = Depends(
     #     return {"post": curr_post}
 
 @router.delete("/{post_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_post(post_id: int, db: Session = Depends(get_db), user_id:int = Depends(oauth2.get_current_user)):
+def delete_post(post_id: int, db: Session = Depends(get_db), curr_user:int = Depends(oauth2.get_current_user)):
     
-    post = db.query(models.Post).filter(models.Post.id == post_id)
+    post_query = db.query(models.Post).filter(models.Post.id == post_id)
+    post = post_query.first()
     
     if not post: 
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
+    if post.owner_id != curr_user.id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authorized to delete this post")
     else: 
-        post.delete(synchronize_session=False)
+        post_query.delete(synchronize_session=False)
         db.commit()
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     
@@ -74,14 +81,17 @@ def delete_post(post_id: int, db: Session = Depends(get_db), user_id:int = Depen
     #     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 @router.put("/{post_id}", status_code=status.HTTP_202_ACCEPTED, response_model=schemas.Post)
-def update_post(post_id: int, post: schemas.PostCreate, db: Session = Depends(get_db), user_id:int = Depends(oauth2.get_current_user)):
+def update_post(post_id: int, post: schemas.PostCreate, db: Session = Depends(get_db), curr_user:int = Depends(oauth2.get_current_user)):
     
-    post = db.query(models.Post).filter(models.Post.id == post_id)
+    post_query = db.query(models.Post).filter(models.Post.id == post_id)
+    post = post_query.first()
     
-    if not post:
+    if not post_query:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
+    if post.owner_id != curr_user.id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authorized to update this post")
     else: 
-        post.update(**post.dict())
+        post.update(**post.model_dump())
         db.commit()
         db.refresh(post)
         return post
